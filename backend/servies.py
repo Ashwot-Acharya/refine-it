@@ -1,8 +1,18 @@
 from pypdf import PdfReader, PdfWriter
 import threading 
+import textanalysis as ta
+filename = '1'
 
 def perform_analysis(text):
     pass
+
+def separate_paragraphs(text):
+
+     paragraphs = text.split("\n")
+     paragraphs = [p.strip() for p in paragraphs if p.strip()]
+     for i, paragraph in enumerate(paragraphs):
+        print(f"Paragraph {i + 1}: {paragraph}")
+        print("------------------------")
 
 
 
@@ -13,7 +23,8 @@ def read_papers(pdf):
         for x in range(page_length):
             page = reader.pages[x]
             text = page.extract_text()
-            perform_analysis(text)
+            ta.analyze_sentence(text , text , text)
+            # separate_paragraphs(text)
     except Exception as e:
         print(e)      
 
@@ -43,9 +54,34 @@ def PDFsplit(pdf, sections):
 
     except Exception as e:
         print(e)
-def run_threads(filename):
-    t1 = threading.Thread(target=read_papers(f"{filename}_part_1.pdf"), name='t1')
-    t1 = threading.Thread(target=read_papers(f"{filename}_part_2.pdf"), name='t2')
-    t3 = threading.Thread(target=read_papers(f"{filename}_part_3.pdf"), name='t3')
+
+
+    
+
+def run_page_slice(filename):
+    t1 = threading.Thread(target=read_papers(f"./papers/{filename}_part_1.pdf"), name='t1')
+    t2 = threading.Thread(target=read_papers(f"./papers/{filename}_part_2.pdf"), name='t2')
+    t3 = threading.Thread(target=read_papers(f"./papers/{filename}_part_3.pdf"), name='t3')
+    t1.start()
+    t2.start()
+    t3.start()
+    t1.join()
+    t2.join()
+    t3.join()
+
+# def run_para_slice(filename):
+
+#     t1 = threading.Thread(target= separate_paragraphs(f"{filename}_part_1.pdf") , name ='t1')
+#     t2 = threading.Thread(target= separate_paragraphs(f"{filename}_part_2.pdf") , name ='t2')
+#     t3 = threading.Thread(target= separate_paragraphs(f"{filename}_part_3.pdf") , name ='t3')
+
+#     t1.start()
+#     t2.start()
+#     t3.start()
+#     t1.join()
+#     t2.join()
+#     t3.join()
+
+run_page_slice('1')
 
 PDFsplit('./papers/1.pdf' , 3)

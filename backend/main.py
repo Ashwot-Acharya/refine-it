@@ -6,10 +6,10 @@ from pydantic import BaseModel
 app = FastAPI()
 
 
-class Users(BaseModel):
-    name: str
-    password: str
-    email: str | None = None
+# class Users(BaseModel):
+#     name: str
+#     password: str
+#     email: str | None = None
 
 
 @app.get("/")
@@ -21,7 +21,3 @@ async def read_root():
 async def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
-@app.post("/items/")
-async def create_item(item: Item):
-    pass
-    
