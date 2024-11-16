@@ -50,3 +50,4 @@ def query_chromadb(collection, query_text, top_n=5):
     except Exception as e:
         logging.error(f"Error querying ChromaDB: {e}")
         return {}
+

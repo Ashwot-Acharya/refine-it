@@ -165,29 +165,6 @@ def process_uploaded_pdf(uploaded_file_path, metadata_json, num_threads=4):
 
     return {"similarities": similarities, "citations_file": citation_file}
 
-
-# def preload_reference_data(reference_folder, metadata_json, batch_size=10):
-#     client, collection = initialize_chromadb()
-#     model = SentenceTransformer('roberta-base')
-#     metadata = load_metadata(metadata_json)
-
-#     ref_files = [f for f in os.listdir(reference_folder) if f.endswith(".pdf")]
-
-#     for i in range(0, len(ref_files), batch_size):
-#         batch = ref_files[i:i + batch_size]
-#         for ref_file in batch:
-#             ref_path = os.path.join(reference_folder, ref_file)
-#             logging.info(f"Processing reference file: {ref_file}")
-#             text_pages = extract_text_from_pdf(ref_path)
-#             paragraphs = split_into_paragraphs(text_pages)
-#             try:
-#                 add_reference_to_chromadb(collection, ref_file, paragraphs)
-#             except Exception as e:
-#                 logging.error(f"Error adding {ref_file} to ChromaDB: {e}")
-#         logging.info(f"Processed batch {i // batch_size + 1}")
-
-#     logging.info("Reference data loaded into ChromaDB!")
-
 def preload_reference_data(reference_folder, metadata_json, batch_size=10):
     client, collection = initialize_chromadb()
     if client is None or collection is None:
@@ -216,3 +193,31 @@ def preload_reference_data(reference_folder, metadata_json, batch_size=10):
         logging.info(f"Processed batch {i // batch_size + 1}")
     
     logging.info("Reference data loaded into ChromaDB!")
+
+def write_paragraphs_with_citations(paragraphs, citations, output_file_path):
+    """
+    Writes paragraphs to a file followed by their corresponding citations.
+    
+    Args:
+        paragraphs (dict): A dictionary of paragraphs with keys as identifiers.
+        citations (list): A list of citation strings corresponding to each paragraph.
+        output_file_path (str): The path to the output file.
+    """
+    try:
+        # Ensure the directory for the output file exists
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        
+        # Open the file for writing
+        with open(output_file_path, "w", encoding="utf-8") as file:
+            file.write("Document Paragraphs with Citations\n")
+            file.write("==================================\n\n")
+            
+            # Write each paragraph followed by its citation
+            for i, (key, paragraph) in enumerate(paragraphs.items()):
+                citation = citations[i] if i < len(citations) else "No citation available"
+                file.write(f"{paragraph} [{citation}]\n\n")
+        
+        print(f"Paragraphs with citations written to {output_file_path}")
+    
+    except Exception as e:
+        print(f"Error writing paragraphs with citations to file: {e}")
