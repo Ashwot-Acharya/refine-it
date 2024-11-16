@@ -2,7 +2,7 @@ from transformers import pipeline
 
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-def summarize_text(text, max_length=130, min_length=30, length_penalty=2.0):
+def summarize_text(text, max_length=2000, min_length=30, length_penalty=2.0):
     
     summary = summarizer(
         text,
