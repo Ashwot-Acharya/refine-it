@@ -1,11 +1,12 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
-import './index.css'; // Optional for global styles
-import RefineItLandingPage from './RefineItLandingPage';
 
-ReactDOM.render(
+import { createRoot } from 'react-dom/client'
+import './index.css'; // Optional for global styles
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <RefineItLandingPage />
+    <App />
   </React.StrictMode>,
-  document.getElementById('root')
+  
 );
