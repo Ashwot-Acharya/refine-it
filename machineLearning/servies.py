@@ -5,6 +5,22 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import summarizer as sz  # Assuming `sz` is the summarizer module you have imported.
 import threading
+import google.generativeai as genai
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from sentence_transformers import SentenceTransformer, util
+from chromadb_service import initialize_chromadb, query_chromadb, add_reference_to_chromadb
+
+
+SIMILARITY_THRESHOLD = 0.7
+
+
+def save_results_to_json(data, output_file):
+    """
+    Saves results to a JSON file.
+    """
+    with open(output_file, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
+    print(f"Results saved to {output_file}")
 
 
 def extract_text_from_pdf(pdf_path):
@@ -26,13 +42,19 @@ def split_into_paragraphs(text_pages):
     """
     paragraph_dict = {}
     for page_no, text in enumerate(text_pages, start=1):
-        paragraphs = text.split("\n\n")
+        paragraphs = text.split("\n")
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
         for para_no, paragraph in enumerate(paragraphs, start=1):
             key = f"{page_no}_{para_no}"
             paragraph_dict[key] = paragraph
     return paragraph_dict
-
+    
+def summarizing_using_gemini(text): 
+    genai.configure(api_key="AIzaSyCpUhPjTcd9SudXgO2SAHtdoaUC3z4uKoU")
+    model = genai.GenerativeModel("gemini-1.5-flash-8b ")
+    response = model.generate_content(f"give me the gist of {text}")
+    print(response.text)
+    return response.text 
 
 def summarize_pdf(text_pages):
     
@@ -42,62 +64,70 @@ def summarize_pdf(text_pages):
     return summaries
 
 
-def compute_similarity_thread(paragraph_keys, paragraphs_1, summarized_text, similarities, lock):
-    """
-    Threaded function to compute cosine similarity for a subset of paragraphs.
-    """
-    vectorizer = TfidfVectorizer()
+def compute_cosine_similarity(paragraphs_1, comparing_text, num_threads=4):
+    similarity_results = {}
+    model = SentenceTransformer('roberta-base')
 
-    # Combine summarized text and subset of paragraphs for vectorization
-    subset_paragraphs = [paragraphs_1[key] for key in paragraph_keys]
-    all_text = subset_paragraphs + [summarized_text]
-    tfidf_matrix = vectorizer.fit_transform(all_text)
+    # Function to summarize a paragraph
+    def summarize_paragraph(key, paragraph):
+        summarized = sz.summarize_text(paragraph)  # Summarize the paragraph
+        return key, summarized
 
-    summarized_vector = tfidf_matrix[-1]  # The vector for summarized text
-    for i, key in enumerate(paragraph_keys):
-        para_vector = tfidf_matrix[i]
-        similarity = cosine_similarity(para_vector, summarized_vector)[0][0]
-        with lock:
-            similarities[key] = similarity
+    # Use multithreading for summarization
+    summarized_paragraphs = {}
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        future_to_key = {executor.submit(summarize_paragraph, key, paragraph): key for key, paragraph in paragraphs_1.items()}
+
+        # Collect results as they complete
+        for future in as_completed(future_to_key):
+            key, summarized = future.result()
+            summarized_paragraphs[key] = summarized
+
+    # Compute cosine similarity sequentially after summarization
+    for key, summarized_paragraph in summarized_paragraphs.items():
+        texts = [summarized_paragraph, comparing_text]
+        embeddings = model.encode(texts, convert_to_tensor=True)
+
+        similarity_matrix = util.pytorch_cos_sim(embeddings, embeddings)
+        similarity_value = similarity_matrix[0, 1].item()
+
+        similarity_results[key] = similarity_value
+
+        # Save intermediate results
+        save_results_to_json(similarity_results, "similarity.json")
+
+    # Print final results
+    for key, similarity in similarity_results.items():
+        print(f"Similarity for {key}: {similarity}")
+
+    return similarity_results    
 
 
-def compute_cosine_similarity(paragraphs_1, summarized_text, num_threads=4):
+def process_uploaded_pdf(uploaded_file_path, reference_folder, num_threads=4):
     """
-    Computes cosine similarity using multi-threading.
+    Processes the uploaded PDF and compares it with reference PDFs stored in ChromaDB.
     """
+    client, collection = initialize_chromadb()
+    text_pages_1 = extract_text_from_pdf(uploaded_file_path)
+    paragraphs_1 = split_into_paragraphs(text_pages_1)
+
+    # Load and summarize the uploaded document
+    uploaded_full_text = " ".join(text_pages_1)
+    uploaded_summary = summarizing_using_gemini(uploaded_full_text)
+
+    # Query ChromaDB for similarities
     similarities = {}
-    lock = threading.Lock()  # Lock to synchronize access to the `similarities` dictionary
-    threads = []
+    results = query_chromadb(collection, uploaded_summary, top_n=5)
 
-    # Split paragraph keys into roughly equal chunks for each thread
-    paragraph_keys = list(paragraphs_1.keys())
-    chunk_size = (len(paragraph_keys) + num_threads - 1) // num_threads
-    chunks = [paragraph_keys[i:i + chunk_size] for i in range(0, len(paragraph_keys), chunk_size)]
-
-    # Create and start threads
-    for chunk in chunks:
-        thread = threading.Thread(
-            target=compute_similarity_thread,
-            args=(chunk, paragraphs_1, summarized_text, similarities, lock)
-        )
-        threads.append(thread)
-        thread.start()
-
-    # Wait for all threads to finish
-    for thread in threads:
-        thread.join()
+    for i, result in enumerate(results["metadatas"]):
+        ref_file = result["file"]
+        ref_key = result["key"]
+        similarity_score = results["distances"][i]  # Lower distance means higher similarity
+        if similarity_score <= 0.3:  # Adjust threshold for your application
+            similarities[ref_file] = similarities.get(ref_file, [])
+            similarities[ref_file].append({"paragraph_key": ref_key, "similarity_score": 1 - similarity_score})
 
     return similarities
-
-
-def save_results_to_json(data, output_file):
-    """
-    Saves results to a JSON file.
-    """
-    with open(output_file, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4, ensure_ascii=False)
-    print(f"Results saved to {output_file}")
-
 
 def main(pdf_to_compare, reference_pdf, output_file, num_threads=4):
     """
@@ -107,9 +137,12 @@ def main(pdf_to_compare, reference_pdf, output_file, num_threads=4):
     text_pages_1 = extract_text_from_pdf(pdf_to_compare)
     paragraphs_1 = split_into_paragraphs(text_pages_1)
 
+
     print("Extracting and summarizing the reference PDF...")
     text_pages_2 = extract_text_from_pdf(reference_pdf)
-    print(text_pages_2)
+    summarized_text =  summarizing_using_gemini(text_pages_2)
+
+    
     # summarized_text = summarize_pdf(text_pages_2)
 
     print("Computing cosine similarity with multi-threading...")
@@ -123,8 +156,8 @@ def main(pdf_to_compare, reference_pdf, output_file, num_threads=4):
 
 if __name__ == "__main__":
     pdf_to_compare = "./test_docs/who.pdf"  # Path to the first PDF.
-    reference_pdf = "./test_docs/1503-00001.pdf"    # Path to the reference PDF.
-    output_file = "./results/similarity_results.json"  # Output file path.
+    reference_pdf = "./test_docs/1504-00001.pdf"    # Path to the reference PDF.
+    output_file = "./results/similarity_results.json"  # Out    put file path.
     num_threads = 4  # Number of threads to use.
 
     # Ensure output directory exists
